@@ -1,0 +1,30 @@
+{
+  "project_info": {
+    "project_number": "440849775159",
+    "firebase_url": "https://llista-de-compra-ec940-default-rtdb.europe-west1.firebasedatabase.app",
+    "project_id": "llista-de-compra-ec940",
+    "storage_bucket": "llista-de-compra-ec940.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:440849775159:android:4669664bd32c80761fddb2",
+        "android_client_info": {
+          "package_name": "com.exemple.llistacompra"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDSjwwL-hH-heWoMvw9gySXDdFSQk9vC0Q"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
