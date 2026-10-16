@@ -1,5 +1,6 @@
 package com.exemple.llistacompra
 
+import android.annotation.SuppressLint
 import android.content.Intent
 import android.graphics.Paint
 import android.graphics.Typeface
@@ -7,6 +8,7 @@ import android.os.Bundle
 import android.text.InputType
 import android.util.Log
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.View
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
@@ -14,8 +16,16 @@ import android.widget.*
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.core.widget.doAfterTextChanged
+import androidx.credentials.ClearCredentialStateRequest
+import androidx.credentials.CredentialManager
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
+import com.google.android.material.chip.Chip
+import com.google.android.material.chip.ChipGroup
 import com.google.android.material.floatingactionbutton.FloatingActionButton
 import com.google.android.material.textfield.TextInputEditText
+import com.google.android.material.textfield.TextInputLayout
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.database.*
 
@@ -39,17 +49,38 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var listaProductos: LinearLayout
     private lateinit var spinnerCategoria: Spinner
+    private lateinit var tilProducte: TextInputLayout
+    private lateinit var inputProducte: TextInputEditText
+    private lateinit var contenedorSugerencias: View
+    private lateinit var chipsCategoria: ChipGroup
 
     private val auth by lazy { FirebaseAuth.getInstance() }
     private val dbRef by lazy { FirebaseDatabase.getInstance().getReference("listas") }
     private val uid get() = auth.currentUser?.uid ?: ""
     private val categoriasRef get() = dbRef.child(uid).child("categorias")
+    private val aprendidoRef get() = dbRef.child(uid).child("aprendido")
 
     private val categorias = mutableMapOf<String, Categoria>()
 
     // Estado del spinner: ids en el mismo orden que los nombres mostrados
     private var idsSpinner: List<String> = emptyList()
     private var categoriaSeleccionadaId: String? = null
+
+    // ── Autoclasificación ──
+    // Correcciones del usuario: "monster" -> "Bebidas"
+    private val aprendido = mutableMapOf<String, String>()
+    // Categorías posibles para lo que se está escribiendo, de más a menos probable
+    private var candidatos: List<String> = emptyList()
+    // Chip que ha tocado el usuario (si ha tocado alguno)
+    private var chipElegido: String? = null
+    // Categoría sugerida final (puede no existir todavía)
+    private var sugerencia: String? = null
+    // true si el usuario ha cambiado la categoría a mano: entonces no la pisamos
+    private var eleccionManual = false
+    private var spinnerTocado = false
+
+    /** Dónde irá el producto. id = null significa que hay que crear la categoría. */
+    private data class Destino(val nombre: String, val id: String?)
 
     // Guardamos el listener para quitarlo al cerrar la Activity
     private var refEscuchada: DatabaseReference? = null
@@ -69,25 +100,26 @@ class MainActivity : AppCompatActivity() {
         setContentView(R.layout.activity_main)
         configurarBarrasSistema(findViewById(R.id.cabecera))
 
-        val inputProducte  = findViewById<TextInputEditText>(R.id.inputProducte)
         val btnAfegir      = findViewById<FloatingActionButton>(R.id.btnAfegir)
         val btnLimpieza    = findViewById<Button>(R.id.btnLimpieza)
         val btnVolverLogin = findViewById<Button>(R.id.btnVolverLogin)
         val txtUsuario     = findViewById<TextView>(R.id.txtUsuario)
         val btnNuevaCat    = findViewById<Button>(R.id.btnNuevaCategoria)
 
+        inputProducte    = findViewById(R.id.inputProducte)
+        tilProducte      = findViewById(R.id.tilProducte)
+        contenedorSugerencias = findViewById(R.id.contenedorSugerencias)
+        chipsCategoria   = findViewById(R.id.chipsCategoria)
         spinnerCategoria = findViewById(R.id.spinnerCategoria)
         listaProductos   = findViewById(R.id.listaProductos)
 
-        // Recordamos qué categoría ha elegido el usuario
-        spinnerCategoria.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
-                categoriaSeleccionadaId = idsSpinner.getOrNull(position)
-            }
-            override fun onNothingSelected(parent: AdapterView<*>?) {}
-        }
+        configurarSpinner()
+
+        // Mientras escribe, sugerimos categoría
+        inputProducte.doAfterTextChanged { actualizarSugerencia() }
 
         mostrarInfoUsuario(txtUsuario)
+        cargarAprendido()
         escucharCategorias()
 
         // Enter del teclado
@@ -103,18 +135,21 @@ class MainActivity : AppCompatActivity() {
             val nombre = inputProducte.text?.toString()?.trim().orEmpty()
 
             if (nombre.isBlank()) {
-                inputProducte.error = "Introduce un producto"
+                tilProducte.error = "Introduce un producto"
                 return@setOnClickListener
             }
 
-            val catId = categoriaSeleccionadaId
-            if (catId == null || catId !in categorias) {
-                toast("Crea primero una categoría")
-                return@setOnClickListener
-            }
+            val destino = categoriaDestino()
+            // Si la categoría sugerida no existe todavía, la creamos
+            val catId = destino.id ?: agregarCategoriaEnFirebase(destino.nombre) ?: return@setOnClickListener
 
             agregarProductoEnFirebase(catId, nombre)
+            aprender(nombre, destino.nombre)
 
+            // Reiniciamos para el siguiente producto
+            eleccionManual = false
+            chipElegido = null
+            sugerencia = null
             inputProducte.text?.clear()
             ocultarTeclado(inputProducte)
         }
@@ -142,7 +177,16 @@ class MainActivity : AppCompatActivity() {
 
         btnVolverLogin.setOnClickListener {
             auth.signOut()
-            irAlLogin()
+            // Olvidamos también la cuenta de Google elegida, para poder escoger otra la próxima vez
+            lifecycleScope.launch {
+                try {
+                    CredentialManager.create(this@MainActivity)
+                        .clearCredentialState(ClearCredentialStateRequest())
+                } catch (e: Exception) {
+                    Log.w("Logout", "No se pudo limpiar la sesión de Google", e)
+                }
+                irAlLogin()
+            }
         }
     }
 
@@ -180,6 +224,8 @@ class MainActivity : AppCompatActivity() {
 
                 reconstruirUI()
                 actualizarSpinner()
+                // Por si hay algo escrito y acaba de aparecer su categoría
+                if (!inputProducte.text.isNullOrBlank()) actualizarSugerencia()
             }
 
             override fun onCancelled(error: DatabaseError) {
@@ -193,14 +239,188 @@ class MainActivity : AppCompatActivity() {
         listenerCategorias = listener
     }
 
+    // ── Autoclasificación ────────────────────────────────
+
+    /** Detecta cuándo es el USUARIO quien cambia el spinner (y no nosotros por código). */
+    @SuppressLint("ClickableViewAccessibility")
+    private fun configurarSpinner() {
+        spinnerCategoria.setOnTouchListener { _, evento ->
+            if (evento.action == MotionEvent.ACTION_UP) spinnerTocado = true
+            false
+        }
+
+        spinnerCategoria.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                val elegida = idsSpinner.getOrNull(position)
+                categoriaSeleccionadaId = elegida
+
+                // El usuario ha elegido a mano algo distinto a lo sugerido -> se respeta
+                if (spinnerTocado && elegida != idSugerido()) {
+                    eleccionManual = true
+                    pintarChips()   // ya ha decidido: escondemos los chips
+                }
+                spinnerTocado = false
+
+                actualizarAyuda()
+            }
+            override fun onNothingSelected(parent: AdapterView<*>?) {}
+        }
+    }
+
+    /** Se llama cada vez que cambia el texto del producto. */
+    private fun actualizarSugerencia() {
+        tilProducte.error = null
+        val nombre = inputProducte.text?.toString()?.trim().orEmpty()
+
+        if (nombre.isEmpty()) {
+            candidatos = emptyList()
+            chipElegido = null
+            sugerencia = null
+            eleccionManual = false
+            pintarChips()
+            actualizarAyuda()
+            return
+        }
+
+        candidatos = Clasificador.candidatos(nombre, aprendido)
+
+        // Si había tocado un chip y sigue siendo válido, lo respetamos
+        val elegido = chipElegido
+        if (elegido != null && candidatos.none { Clasificador.mismoNombre(it, elegido) }) chipElegido = null
+        sugerencia = chipElegido ?: candidatos.firstOrNull()
+
+        // Si no la ha cambiado a mano, movemos el spinner a la categoría sugerida
+        if (!eleccionManual) idSugerido()?.let { seleccionarEnSpinner(it) }
+
+        pintarChips()
+        actualizarAyuda()
+    }
+
+    /** Muestra un chip por categoría posible cuando hay más de una. */
+    private fun pintarChips() {
+        val mostrar = candidatos.size >= 2 && !eleccionManual
+        contenedorSugerencias.visibility = if (mostrar) View.VISIBLE else View.GONE
+        chipsCategoria.removeAllViews()
+        if (!mostrar) return
+
+        candidatos.forEach { nombre ->
+            val chip = layoutInflater.inflate(R.layout.item_chip_categoria, chipsCategoria, false) as Chip
+            chip.id = View.generateViewId()
+            chip.text = nombre
+            chip.isChecked = sugerencia?.let { Clasificador.mismoNombre(it, nombre) } == true
+            chip.setOnClickListener { elegirChip(nombre) }
+            chipsCategoria.addView(chip)
+        }
+    }
+
+    /** El usuario toca un chip: esa pasa a ser la categoría de destino. */
+    private fun elegirChip(nombre: String) {
+        chipElegido = nombre
+        sugerencia = nombre
+        eleccionManual = false
+        idSugerido()?.let { seleccionarEnSpinner(it) }
+        actualizarAyuda()
+    }
+
+    /** Texto de ayuda bajo el campo: dónde se va a guardar el producto. */
+    private fun actualizarAyuda() {
+        val nombre = inputProducte.text?.toString()?.trim().orEmpty()
+        if (nombre.isEmpty()) {
+            tilProducte.helperText = null
+            return
+        }
+
+        val destino = categoriaDestino()
+        val etiqueta = when {
+            destino.id == null -> " (nueva categoría)"
+            chipElegido != null -> ""
+            !eleccionManual && sugerencia != null -> " · sugerida"
+            else -> ""
+        }
+        tilProducte.helperText = "Se añadirá a: ${destino.nombre}$etiqueta"
+    }
+
+    private fun categoriaDestino(): Destino {
+        // 1. La sugerencia, si el usuario no ha elegido otra cosa
+        if (!eleccionManual) {
+            sugerencia?.let { s ->
+                val existente = buscarCategoriaPorNombre(s)
+                return Destino(existente?.nombre ?: s, existente?.id)
+            }
+        }
+        // 2. Lo que haya en el spinner
+        categoriaSeleccionadaId?.let { id -> categorias[id]?.let { return Destino(it.nombre, it.id) } }
+        // 3. Si no hay ninguna categoría: "Otros"
+        return Destino(Clasificador.OTROS, buscarCategoriaPorNombre(Clasificador.OTROS)?.id)
+    }
+
+    private fun idSugerido(): String? = sugerencia?.let { buscarCategoriaPorNombre(it)?.id }
+
+    private fun buscarCategoriaPorNombre(nombre: String): Categoria? =
+        categorias.values.firstOrNull { Clasificador.mismoNombre(it.nombre, nombre) }
+
+    private fun seleccionarEnSpinner(catId: String) {
+        val index = idsSpinner.indexOf(catId)
+        if (index >= 0 && spinnerCategoria.selectedItemPosition != index) {
+            spinnerCategoria.setSelection(index)
+        }
+        categoriaSeleccionadaId = catId
+    }
+
+    /**
+     * Guarda la corrección del usuario para la próxima vez.
+     * Si coincide con lo que ya diría el diccionario, no hace falta guardarla.
+     */
+    private fun aprender(producto: String, categoria: String) {
+        if (uid.isEmpty()) return
+        val clave = Clasificador.clave(producto)
+        if (clave.isEmpty()) return
+
+        val porDiccionario = Clasificador.sugerirPorDiccionario(producto)
+        if (porDiccionario != null && Clasificador.mismoNombre(porDiccionario, categoria)) {
+            if (aprendido.remove(clave) != null) aprendidoRef.child(clave).removeValue()
+            return
+        }
+
+        if (aprendido[clave] != categoria) {
+            aprendido[clave] = categoria
+            aprendidoRef.child(clave).setValue(categoria)
+        }
+    }
+
+    private fun cargarAprendido() {
+        if (uid.isEmpty()) return
+        aprendidoRef.get().addOnSuccessListener { snapshot ->
+            snapshot.children.forEach { hijo ->
+                val clave = hijo.key ?: return@forEach
+                val categoria = hijo.getValue(String::class.java) ?: return@forEach
+                aprendido[clave] = categoria
+            }
+        }
+    }
+
     // ── CRUD ─────────────────────────────────────────────
 
-    private fun agregarCategoriaEnFirebase(nombre: String) {
-        if (uid.isEmpty()) return
-        val catId = categoriasRef.push().key ?: return
-        // La nueva categoría queda seleccionada en el spinner
+    /** Crea la categoría, la deja seleccionada y devuelve su id. */
+    private fun agregarCategoriaEnFirebase(nombre: String): String? {
+        if (uid.isEmpty()) return null
+        val catId = categoriasRef.push().key ?: return null
         categoriaSeleccionadaId = catId
         categoriasRef.child(catId).child("nombre").setValue(nombre)
+        return catId
+    }
+
+    /** Mueve un producto de una categoría a otra en una sola escritura. */
+    private fun moverProducto(origenId: String, destinoId: String, producto: Producto) {
+        if (uid.isEmpty() || origenId == destinoId) return
+        val cambios = mapOf<String, Any?>(
+            "$origenId/productos/${producto.id}" to null,
+            "$destinoId/productos/${producto.id}" to mapOf(
+                "nombre" to producto.nombre,
+                "completado" to producto.completado
+            )
+        )
+        categoriasRef.updateChildren(cambios)
     }
 
     private fun editarCategoriaEnFirebase(catId: String, nuevoNombre: String) {
@@ -290,14 +510,38 @@ class MainActivity : AppCompatActivity() {
     private fun mostrarOpcionesProducto(catId: String, producto: Producto) {
         AlertDialog.Builder(this)
             .setTitle(producto.nombre)
-            .setItems(arrayOf("Editar", "Eliminar")) { _, opcion ->
+            .setItems(arrayOf("Editar", "Cambiar de categoría", "Eliminar")) { _, opcion ->
                 when (opcion) {
                     0 -> mostrarDialogoTexto("Editar producto", "Nombre del producto", producto.nombre, "Guardar") { nuevo ->
                         editarProductoEnFirebase(catId, producto.id, nuevo)
                     }
-                    1 -> eliminarProductoEnFirebase(catId, producto.id)
+                    1 -> elegirNuevaCategoria(catId, producto)
+                    2 -> eliminarProductoEnFirebase(catId, producto.id)
                 }
             }
+            .show()
+    }
+
+    /** Lista de categorías para mover el producto. La app aprende la elección. */
+    private fun elegirNuevaCategoria(catActualId: String, producto: Producto) {
+        val otras = categorias.values
+            .filter { it.id != catActualId }
+            .sortedBy { it.nombre.lowercase() }
+
+        if (otras.isEmpty()) {
+            toast("No hay otras categorías. Crea una con \"Nueva\"")
+            return
+        }
+
+        AlertDialog.Builder(this)
+            .setTitle("Mover \"${producto.nombre}\" a…")
+            .setItems(otras.map { it.nombre }.toTypedArray()) { _, i ->
+                val destino = otras[i]
+                moverProducto(catActualId, destino.id, producto)
+                aprender(producto.nombre, destino.nombre)
+                toast("Movido a ${destino.nombre}. Lo recordaré para la próxima vez")
+            }
+            .setNegativeButton("Cancelar", null)
             .show()
     }
 

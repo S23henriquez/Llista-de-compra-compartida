@@ -142,6 +142,32 @@
                 app:tint="@color/white" />
         </LinearLayout>
 
+        <!-- Si el producto encaja en varias categorías, el usuario elige aquí -->
+        <LinearLayout
+            android:id="@+id/contenedorSugerencias"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:orientation="vertical"
+            android:visibility="gone">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Puede ir en varias categorías, elige una:"
+                android:textColor="@color/text_secondary"
+                android:textSize="12sp" />
+
+            <com.google.android.material.chip.ChipGroup
+                android:id="@+id/chipsCategoria"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                app:chipSpacingHorizontal="8dp"
+                app:selectionRequired="true"
+                app:singleSelection="true" />
+        </LinearLayout>
+
         <!-- Categoría -->
         <TextView
             android:layout_width="wrap_content"
