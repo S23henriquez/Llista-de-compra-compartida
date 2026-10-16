@@ -1,7 +1,6 @@
 package com.exemple.llistacompra
 
 import android.content.Intent
-import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Typeface
 import android.os.Bundle
@@ -68,6 +67,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         setContentView(R.layout.activity_main)
+        configurarBarrasSistema(findViewById(R.id.cabecera))
 
         val inputProducte  = findViewById<TextInputEditText>(R.id.inputProducte)
         val btnAfegir      = findViewById<FloatingActionButton>(R.id.btnAfegir)
@@ -348,29 +348,56 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun crearVistaCategoria(categoria: Categoria): LinearLayout {
+        // Cada categoría es una tarjeta blanca
         val contenedor = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(0, 12.dp, 0, 4.dp)
+            setBackgroundResource(R.drawable.bg_categoria)
+            setPadding(16.dp, 12.dp, 12.dp, 8.dp)
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = 12.dp }
         }
 
-        val cabecera = TextView(this).apply {
-            text = categoria.nombre.uppercase()
-            setTypeface(typeface, Typeface.BOLD)
-            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.purple_500))
-            setPadding(4.dp, 8.dp, 4.dp, 8.dp)
+        // Cabecera: nombre a la izquierda, contador "pendientes/total" a la derecha
+        val total = categoria.productos.size
+        val pendientes = categoria.productos.values.count { !it.completado }
+
+        val cabecera = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, 4.dp, 4.dp, 8.dp)
             setOnLongClickListener {
                 mostrarOpcionesCategoria(categoria)
                 true
             }
         }
+
+        cabecera.addView(TextView(this).apply {
+            text = categoria.nombre.uppercase()
+            textSize = 13f
+            letterSpacing = 0.08f
+            setTypeface(typeface, Typeface.BOLD)
+            setTextColor(color(R.color.primary))
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        })
+
+        if (total > 0) {
+            cabecera.addView(TextView(this).apply {
+                text = "$pendientes/$total"
+                textSize = 12f
+                setTextColor(color(R.color.text_secondary))
+            })
+        }
+
         contenedor.addView(cabecera)
 
         if (categoria.productos.isEmpty()) {
             contenedor.addView(TextView(this).apply {
                 text = "Sin productos todavía"
-                setTextColor(Color.GRAY)
+                setTextColor(color(R.color.text_secondary))
                 setTypeface(typeface, Typeface.ITALIC)
-                setPadding(12.dp, 0, 0, 8.dp)
+                setPadding(4.dp, 0, 0, 8.dp)
             })
         } else {
             // Pendientes primero, completados al final; alfabético dentro de cada grupo
@@ -402,7 +429,9 @@ class MainActivity : AppCompatActivity() {
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
             if (producto.completado) {
                 paintFlags = paintFlags or Paint.STRIKE_THRU_TEXT_FLAG
-                setTextColor(Color.GRAY)
+                setTextColor(color(R.color.text_secondary))
+            } else {
+                setTextColor(color(R.color.text_primary))
             }
             // Tocar el texto también marca/desmarca
             setOnClickListener { checkBox.toggle() }
@@ -447,9 +476,9 @@ class MainActivity : AppCompatActivity() {
 
     private fun mostrarEstadoVacio() {
         val tv = TextView(this).apply {
-            text = "No hay categorías.\nPulsa \"+ Categoría\" para crear la primera."
+            text = "Todavía no hay categorías.\nPulsa \"Nueva\" para crear la primera."
             gravity = Gravity.CENTER
-            setTextColor(Color.GRAY)
+            setTextColor(color(R.color.text_secondary))
             setPadding(0, 48.dp, 0, 0)
         }
         listaProductos.addView(tv)
@@ -465,6 +494,8 @@ class MainActivity : AppCompatActivity() {
         val imm = getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager
         imm.hideSoftInputFromWindow(view.windowToken, 0)
     }
+
+    private fun color(id: Int) = ContextCompat.getColor(this, id)
 
     private fun toast(mensaje: String) =
         Toast.makeText(this, mensaje, Toast.LENGTH_SHORT).show()

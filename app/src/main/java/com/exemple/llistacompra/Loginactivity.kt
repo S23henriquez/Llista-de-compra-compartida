@@ -6,7 +6,6 @@ import android.view.inputmethod.EditorInfo
 import android.widget.Button
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.content.ContextCompat.startActivity
 import com.google.android.material.textfield.TextInputEditText
 import com.google.firebase.FirebaseNetworkException
 import com.google.firebase.auth.FirebaseAuth
@@ -29,6 +28,7 @@ class LoginActivity : AppCompatActivity() {
         }
 
         setContentView(R.layout.login)
+        configurarBarrasSistema(findViewById(R.id.cabecera))
 
         val inputEmail = findViewById<TextInputEditText>(R.id.inputEmail)
         val inputPassword = findViewById<TextInputEditText>(R.id.inputPassword)
