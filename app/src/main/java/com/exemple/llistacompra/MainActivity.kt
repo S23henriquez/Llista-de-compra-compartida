@@ -40,6 +40,7 @@ data class Producto(
 data class Categoria(
     val id: String = "",
     val nombre: String = "",
+    val emoji: String = "",
     val productos: Map<String, Producto> = emptyMap()
 )
 
@@ -141,7 +142,9 @@ class MainActivity : AppCompatActivity() {
 
             val destino = categoriaDestino()
             // Si la categoría sugerida no existe todavía, la creamos
-            val catId = destino.id ?: agregarCategoriaEnFirebase(destino.nombre) ?: return@setOnClickListener
+            val catId = destino.id
+                ?: agregarCategoriaEnFirebase(destino.nombre, Clasificador.emojiPara(destino.nombre))
+                ?: return@setOnClickListener
 
             agregarProductoEnFirebase(catId, nombre)
             aprender(nombre, destino.nombre)
@@ -154,12 +157,7 @@ class MainActivity : AppCompatActivity() {
             ocultarTeclado(inputProducte)
         }
 
-        btnNuevaCat.setOnClickListener {
-            mostrarDialogoTexto("Nueva categoría", "Nombre de la categoría", "", "Crear") { nombre ->
-                if (existeCategoria(nombre)) toast("Ya existe esa categoría")
-                else agregarCategoriaEnFirebase(nombre)
-            }
-        }
+        btnNuevaCat.setOnClickListener { mostrarDialogoCategoria(null) }
 
         btnLimpieza.setOnClickListener {
             val hayCompletados = categorias.values.any { cat -> cat.productos.values.any { it.completado } }
@@ -219,7 +217,8 @@ class MainActivity : AppCompatActivity() {
                         productos[prodId] = Producto(prodId, prodNombre, completado)
                     }
 
-                    categorias[catId] = Categoria(catId, nombre, productos)
+                    val emoji = catSnap.child("emoji").getValue(String::class.java).orEmpty()
+                    categorias[catId] = Categoria(catId, nombre, emoji, productos)
                 }
 
                 reconstruirUI()
@@ -402,11 +401,11 @@ class MainActivity : AppCompatActivity() {
     // ── CRUD ─────────────────────────────────────────────
 
     /** Crea la categoría, la deja seleccionada y devuelve su id. */
-    private fun agregarCategoriaEnFirebase(nombre: String): String? {
+    private fun agregarCategoriaEnFirebase(nombre: String, emoji: String): String? {
         if (uid.isEmpty()) return null
         val catId = categoriasRef.push().key ?: return null
         categoriaSeleccionadaId = catId
-        categoriasRef.child(catId).child("nombre").setValue(nombre)
+        categoriasRef.child(catId).setValue(mapOf("nombre" to nombre, "emoji" to emoji))
         return catId
     }
 
@@ -423,9 +422,10 @@ class MainActivity : AppCompatActivity() {
         categoriasRef.updateChildren(cambios)
     }
 
-    private fun editarCategoriaEnFirebase(catId: String, nuevoNombre: String) {
+    /** Cambia nombre y emoji sin tocar los productos de la categoría. */
+    private fun editarCategoriaEnFirebase(catId: String, nuevoNombre: String, nuevoEmoji: String) {
         if (uid.isEmpty()) return
-        categoriasRef.child(catId).child("nombre").setValue(nuevoNombre)
+        categoriasRef.child(catId).updateChildren(mapOf("nombre" to nuevoNombre, "emoji" to nuevoEmoji))
     }
 
     private fun eliminarCategoriaEnFirebase(catId: String) {
@@ -482,12 +482,9 @@ class MainActivity : AppCompatActivity() {
     private fun mostrarOpcionesCategoria(categoria: Categoria) {
         AlertDialog.Builder(this)
             .setTitle(categoria.nombre)
-            .setItems(arrayOf("Renombrar", "Eliminar")) { _, opcion ->
+            .setItems(arrayOf("Editar nombre e icono", "Eliminar")) { _, opcion ->
                 when (opcion) {
-                    0 -> mostrarDialogoTexto("Renombrar categoría", "Nombre", categoria.nombre, "Guardar") { nuevo ->
-                        if (nuevo != categoria.nombre && existeCategoria(nuevo)) toast("Ya existe esa categoría")
-                        else editarCategoriaEnFirebase(categoria.id, nuevo)
-                    }
+                    0 -> mostrarDialogoCategoria(categoria)
                     1 -> confirmarEliminarCategoria(categoria)
                 }
             }
@@ -617,6 +614,15 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+        // Emoji: al tocarlo se abre el editor de la categoría
+        cabecera.addView(TextView(this).apply {
+            text = emojiDe(categoria)
+            textSize = 20f
+            setPadding(0, 0, 8.dp, 0)
+            contentDescription = "Cambiar icono de ${categoria.nombre}"
+            setOnClickListener { mostrarDialogoCategoria(categoria) }
+        })
+
         cabecera.addView(TextView(this).apply {
             text = categoria.nombre.uppercase()
             textSize = 13f
@@ -698,7 +704,10 @@ class MainActivity : AppCompatActivity() {
         val ordenadas = categorias.values.sortedBy { it.nombre.lowercase() }
         idsSpinner = ordenadas.map { it.id }
 
-        val adapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, ordenadas.map { it.nombre })
+        val adapter = ArrayAdapter(
+            this, android.R.layout.simple_spinner_item,
+            ordenadas.map { "${emojiDe(it)}  ${it.nombre}" }
+        )
         adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
         spinnerCategoria.adapter = adapter
 
@@ -715,8 +724,141 @@ class MainActivity : AppCompatActivity() {
 
     // ── Helpers ──────────────────────────────────────────
 
-    private fun existeCategoria(nombre: String) =
-        categorias.values.any { it.nombre.equals(nombre, ignoreCase = true) }
+    /** ¿Hay otra categoría con ese nombre? (se excluye la que se está editando) */
+    private fun existeOtraCategoria(nombre: String, exceptoId: String?) =
+        categorias.values.any { it.id != exceptoId && Clasificador.mismoNombre(it.nombre, nombre) }
+
+    /** Emoji guardado, o uno por defecto según el nombre (para categorías antiguas sin emoji). */
+    private fun emojiDe(categoria: Categoria) =
+        categoria.emoji.ifBlank { Clasificador.emojiPara(categoria.nombre) }
+
+    // ── Diálogo de categoría (crear / editar) ────────────
+
+    /**
+     * Si [existente] es null crea una categoría nueva; si no, la edita.
+     * Mientras no se toque el emoji, se va sugiriendo uno según el nombre que se escribe.
+     */
+    private fun mostrarDialogoCategoria(existente: Categoria?) {
+        val vista = layoutInflater.inflate(R.layout.dialogo_categoria, null)
+        val txtEmoji = vista.findViewById<TextView>(R.id.txtEmojiElegido)
+        val tilNombre = vista.findViewById<TextInputLayout>(R.id.tilNombreCategoria)
+        val inputNombre = vista.findViewById<TextInputEditText>(R.id.inputNombreCategoria)
+        val grid = vista.findViewById<GridView>(R.id.gridEmojis)
+        val tilOtro = vista.findViewById<TextInputLayout>(R.id.tilOtroEmoji)
+        val inputOtro = vista.findViewById<TextInputEditText>(R.id.inputOtroEmoji)
+
+        var emojiElegido = existente?.let { emojiDe(it) } ?: Clasificador.EMOJI_POR_DEFECTO
+        var emojiTocado = existente != null   // al editar no cambiamos el emoji solo
+
+        val adapter = EmojiAdapter(Clasificador.EMOJIS_DISPONIBLES, emojiElegido)
+        grid.adapter = adapter
+
+        fun elegir(emoji: String, aMano: Boolean) {
+            emojiElegido = emoji
+            if (aMano) emojiTocado = true
+            txtEmoji.text = emoji
+            adapter.seleccionar(emoji)
+        }
+
+        txtEmoji.text = emojiElegido
+        inputNombre.setText(existente?.nombre.orEmpty())
+        inputNombre.setSelection(inputNombre.text?.length ?: 0)
+
+        // Sugerencia automática de emoji mientras escribe el nombre
+        inputNombre.doAfterTextChanged { texto ->
+            tilNombre.error = null
+            if (!emojiTocado) elegir(Clasificador.emojiPara(texto.toString()), aMano = false)
+        }
+
+        grid.setOnItemClickListener { _, _, posicion, _ ->
+            inputOtro.text?.clear()
+            elegir(adapter.getItem(posicion), aMano = true)
+        }
+
+        // Cualquier emoji escrito con el teclado
+        inputOtro.doAfterTextChanged { texto ->
+            val escrito = texto?.toString().orEmpty()
+            if (escrito.isBlank()) {
+                tilOtro.error = null
+                return@doAfterTextChanged
+            }
+            val emoji = primerEmoji(escrito)
+            if (emoji == null) {
+                tilOtro.error = "Eso no es un emoji"
+            } else {
+                tilOtro.error = null
+                elegir(emoji, aMano = true)
+            }
+        }
+
+        val dialogo = AlertDialog.Builder(this)
+            .setTitle(if (existente == null) "Nueva categoría" else "Editar categoría")
+            .setView(vista)
+            .setPositiveButton(if (existente == null) "Crear" else "Guardar", null)
+            .setNegativeButton("Cancelar", null)
+            .create()
+
+        // Validamos sin cerrar el diálogo si hay errores
+        dialogo.setOnShowListener {
+            dialogo.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val nombre = inputNombre.text?.toString()?.trim().orEmpty()
+                when {
+                    nombre.isEmpty() -> tilNombre.error = "Ponle un nombre"
+                    existeOtraCategoria(nombre, existente?.id) -> tilNombre.error = "Ya existe esa categoría"
+                    else -> {
+                        if (existente == null) agregarCategoriaEnFirebase(nombre, emojiElegido)
+                        else editarCategoriaEnFirebase(existente.id, nombre, emojiElegido)
+                        dialogo.dismiss()
+                    }
+                }
+            }
+        }
+
+        dialogo.show()
+    }
+
+    /**
+     * Devuelve el primer emoji del texto, o null si lo primero es una letra/número.
+     * Usa el BreakIterator de ICU para no partir emojis compuestos (👨‍👩‍👧, 🇪🇸...).
+     */
+    private fun primerEmoji(texto: String): String? {
+        val limpio = texto.trim()
+        if (limpio.isEmpty()) return null
+
+        val iterador = android.icu.text.BreakIterator.getCharacterInstance()
+        iterador.setText(limpio)
+        val fin = iterador.next()
+        val primero = if (fin > 0) limpio.substring(0, fin) else limpio
+
+        val codigo = primero.codePointAt(0)
+        return if (Character.isLetterOrDigit(codigo) || Character.isWhitespace(codigo)) null else primero
+    }
+
+    /** Adaptador de la cuadrícula: marca con un recuadro el emoji seleccionado. */
+    private inner class EmojiAdapter(
+        private val emojis: List<String>,
+        private var seleccionado: String
+    ) : BaseAdapter() {
+
+        fun seleccionar(emoji: String) {
+            seleccionado = emoji
+            notifyDataSetChanged()
+        }
+
+        override fun getCount() = emojis.size
+        override fun getItem(position: Int) = emojis[position]
+        override fun getItemId(position: Int) = position.toLong()
+
+        override fun getView(position: Int, convertView: View?, parent: android.view.ViewGroup): View {
+            val vista = (convertView as? TextView)
+                ?: layoutInflater.inflate(R.layout.item_emoji, parent, false) as TextView
+            val emoji = emojis[position]
+            vista.text = emoji
+            if (emoji == seleccionado) vista.setBackgroundResource(R.drawable.bg_emoji_seleccionado)
+            else vista.background = null
+            return vista
+        }
+    }
 
     private fun mostrarEstadoVacio() {
         val tv = TextView(this).apply {

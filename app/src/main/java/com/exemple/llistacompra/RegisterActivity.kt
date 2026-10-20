@@ -46,6 +46,18 @@ class RegisterActivity : AppCompatActivity() {
 
         val btnRegister = findViewById<Button>(R.id.btnRegister)
         val btnGoToLogin = findViewById<Button>(R.id.btnGoToLogin)
+        val btnGoogle = findViewById<Button>(R.id.btnGoogle)
+
+        // ── Registrarse con Google (crea la cuenta si no existe) ──
+        val accesoGoogle = AccesoGoogle(
+            this,
+            onCargando = { activo ->
+                btnRegister.isEnabled = !activo
+                btnGoogle.isEnabled = !activo
+            },
+            onExito = ::irAMain
+        )
+        btnGoogle.setOnClickListener { accesoGoogle.iniciar() }
 
         requisitos = listOf(
             findViewById<TextView>(R.id.reqLongitud) to { p: String -> p.length >= LONGITUD_MINIMA },
@@ -113,11 +125,7 @@ class RegisterActivity : AppCompatActivity() {
                 .addOnCompleteListener { task ->
                     btnRegister.isEnabled = true
                     if (task.isSuccessful) {
-                        // Limpiamos la pila para que "atrás" no vuelva al login/registro
-                        val intent = Intent(this, MainActivity::class.java)
-                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
-                        startActivity(intent)
-                        finish()
+                        irAMain()
                     } else {
                         Toast.makeText(this, mensajeDeError(task.exception), Toast.LENGTH_LONG).show()
                     }
@@ -136,7 +144,7 @@ class RegisterActivity : AppCompatActivity() {
         }
     }
 
-    // ── Helpers de contraseña
+    // ── Helpers de contraseña ───────────────────────────────
 
     private fun esPasswordSegura(password: String) =
         requisitos.all { (_, regla) -> regla(password) }
@@ -157,6 +165,14 @@ class RegisterActivity : AppCompatActivity() {
 
     private fun comprobarCoincidencia(til: TextInputLayout, password: String, confirm: String) {
         til.error = if (confirm.isNotEmpty() && confirm != password) "Las contraseñas no coinciden" else null
+    }
+
+    /** Va a la lista y limpia la pila para que "atrás" no vuelva al login/registro. */
+    private fun irAMain() {
+        val intent = Intent(this, MainActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+        startActivity(intent)
+        finish()
     }
 
     private fun mensajeDeError(e: Exception?): String = when (e) {

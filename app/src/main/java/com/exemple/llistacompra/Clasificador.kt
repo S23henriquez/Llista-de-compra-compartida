@@ -4,14 +4,69 @@ import java.text.Normalizer
 
 /**
  * Sugiere la(s) categoría(s) de un producto a partir de su nombre.
+ *
  *  1. Primero lo que el usuario ha "enseñado" (sus correcciones guardadas).
  *  2. Después el diccionario de palabras clave.
  *  3. Si el producto encaja en varias categorías devuelve todas, de más a menos probable,
  *     para que el usuario elija: "patatas" -> [Verdura, Snacks].
+ *
+ * Las palabras clave se escriben en minúscula, sin tildes (pero CON ñ) y en singular:
+ * "pañal" reconoce "Pañales", "pañal" y también "panales" (escrito sin ñ).
  */
 object Clasificador {
 
     const val OTROS = "Otros"
+    const val EMOJI_POR_DEFECTO = "🛒"
+
+    /** Emoji por defecto de cada categoría del diccionario. */
+    private val emojisCategoria: Map<String, String> = mapOf(
+        "Fruta" to "🍎",
+        "Verdura" to "🥦",
+        "Carne" to "🥩",
+        "Pescado" to "🐟",
+        "Lácteos y huevos" to "🥛",
+        "Panadería" to "🥖",
+        "Desayuno y dulces" to "🍪",
+        "Despensa" to "🥫",
+        "Bebidas" to "🥤",
+        "Congelados" to "🧊",
+        "Snacks" to "🍿",
+        "Limpieza" to "🧽",
+        "Higiene" to "🧴",
+        "Mascotas" to "🐾",
+        OTROS to EMOJI_POR_DEFECTO
+    )
+
+    /** Emojis que se ofrecen en la cuadrícula al crear/editar una categoría. */
+    val EMOJIS_DISPONIBLES: List<String> = listOf(
+        "🛒", "🍎", "🍌", "🍊", "🍇", "🍓", "🍉", "🍍", "🥑", "🍋",
+        "🥕", "🥦", "🥬", "🍅", "🥔", "🌽", "🍄", "🥒", "🌶️", "🥗",
+        "🥩", "🍗", "🥓", "🌭", "🍔", "🐟", "🦐", "🦑", "🥚", "🥛",
+        "🧀", "🍞", "🥐", "🥖", "🥨", "🍪", "🍫", "🍰", "🍯", "☕",
+        "🍵", "🍚", "🍝", "🥫", "🧂", "🥤", "🍺", "🍷", "🧊", "🍦",
+        "🍕", "🍿", "🥜", "🍬", "🧽", "🧴", "🧼", "🧻", "🧹", "🧺",
+        "🐾", "👶", "💊", "🏠", "🎉", "🎁", "📦", "⭐"
+    )
+
+    /**
+     * Emoji para un nombre de categoría:
+     *  1. Si es una del diccionario (o empieza igual: "Frutas y verduras" -> Fruta) -> su emoji.
+     *  2. Si el nombre parece un producto ("Patatas") -> el emoji de su categoría.
+     *  3. Si no -> 🛒
+     */
+    fun emojiPara(nombreCategoria: String): String {
+        emojisCategoria.entries.firstOrNull { mismoNombre(it.key, nombreCategoria) }?.let { return it.value }
+
+        val primera = palabrasDe(nombreCategoria).firstOrNull() ?: return EMOJI_POR_DEFECTO
+        emojisCategoria.entries.firstOrNull { (categoria, _) ->
+            palabrasDe(categoria).firstOrNull()?.let { coincide(primera, it) } == true
+        }?.let { return it.value }
+
+        candidatos(nombreCategoria).firstOrNull()?.let { categoria ->
+            emojisCategoria[categoria]?.let { return it }
+        }
+        return EMOJI_POR_DEFECTO
+    }
 
     private val diccionario: Map<String, List<String>> = mapOf(
         "Fruta" to listOf(
@@ -92,9 +147,9 @@ object Clasificador {
     /** Una palabra clave que encaja con el producto. */
     private data class Coincidencia(
         val categoria: String,
-        val completa: Boolean,
-        val inicio: Int,
-        val longitud: Int
+        val completa: Boolean,  // true: "patatas" ↔ "patata" | false: "patatas" ↔ "patatas fritas"
+        val inicio: Int,        // posición en el producto
+        val longitud: Int       // nº de palabras que ocupa
     ) {
         val fin get() = inicio + longitud
     }
@@ -171,8 +226,8 @@ object Clasificador {
     private fun normalizar(texto: String): String {
         val separado = Normalizer.normalize(texto.lowercase().trim(), Normalizer.Form.NFD)
         return separado
-            .replace("ñ", "ñ")
-            .replace(Regex("\\p{Mn}+"), "")
+            .replace("ñ", "ñ")            // la ñ se separa en n + ~ : la volvemos a juntar
+            .replace(Regex("\\p{Mn}+"), "")      // quitamos el resto de tildes (á, é, ü...)
             .replace(Regex("\\s+"), " ")
     }
 
@@ -206,7 +261,7 @@ object Clasificador {
 
     private fun esFormaDe(palabra: String, clave: String): Boolean =
         palabra == clave ||
-            palabra == clave + "s" ||
-            palabra == clave + "es" ||
-            (clave.endsWith("z") && palabra == clave.dropLast(1) + "ces")
+                palabra == clave + "s" ||
+                palabra == clave + "es" ||
+                (clave.endsWith("z") && palabra == clave.dropLast(1) + "ces")
 }
