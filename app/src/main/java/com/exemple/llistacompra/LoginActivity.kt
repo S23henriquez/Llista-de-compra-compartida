@@ -6,16 +6,20 @@ import android.view.inputmethod.EditorInfo
 import android.widget.Button
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.content.ContextCompat.startActivity
 import com.google.android.material.textfield.TextInputEditText
 import com.google.firebase.FirebaseNetworkException
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseAuthInvalidCredentialsException
 import com.google.firebase.auth.FirebaseAuthInvalidUserException
+import kotlin.jvm.java
 
 class LoginActivity : AppCompatActivity() {
 
     private lateinit var auth: FirebaseAuth
+    private lateinit var accesoGoogle: AccesoGoogle
+
+    private lateinit var btnLogin: Button
+    private lateinit var btnGoogle: Button
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -29,36 +33,41 @@ class LoginActivity : AppCompatActivity() {
         }
 
         setContentView(R.layout.login)
+        configurarBarrasSistema(findViewById(R.id.cabecera))
 
         val inputEmail = findViewById<TextInputEditText>(R.id.inputEmail)
         val inputPassword = findViewById<TextInputEditText>(R.id.inputPassword)
-        val btnLogin = findViewById<Button>(R.id.btnLogin)
         val btnGoToRegister = findViewById<Button>(R.id.btnGoToRegister)
+        btnLogin = findViewById(R.id.btnLogin)
+        btnGoogle = findViewById(R.id.btnGoogle)
 
+        accesoGoogle = AccesoGoogle(this, onCargando = ::cargando, onExito = ::irAMain)
+
+        // ── Correo y contraseña ─────────────────────────────
         btnLogin.setOnClickListener {
             val email = inputEmail.text.toString().trim()
             // La contraseña NO se recorta: los espacios pueden formar parte de ella
             val password = inputPassword.text.toString()
 
             if (email.isEmpty() || password.isEmpty()) {
-                Toast.makeText(this, "Por favor, completa todos los campos", Toast.LENGTH_SHORT).show()
+                toast("Por favor, completa todos los campos")
                 return@setOnClickListener
             }
 
-            btnLogin.isEnabled = false
+            cargando(true)
 
             auth.signInWithEmailAndPassword(email, password)
                 .addOnCompleteListener { task ->
-                    btnLogin.isEnabled = true
+                    cargando(false)
                     if (task.isSuccessful) {
                         irAMain()
                     } else {
-                        Toast.makeText(this, mensajeDeError(task.exception), Toast.LENGTH_LONG).show()
+                        toast(mensajeDeError(task.exception), largo = true)
                     }
                 }
         }
 
-        // Enter en la contraseña = pulsar "Iniciar sesión"
+        // Enter en la contraseña = pulsar "Entrar"
         inputPassword.setOnEditorActionListener { _, actionId, _ ->
             if (actionId == EditorInfo.IME_ACTION_DONE) {
                 btnLogin.performClick()
@@ -66,9 +75,20 @@ class LoginActivity : AppCompatActivity() {
             } else false
         }
 
+        // ── Google ──────────────────────────────────────────
+        btnGoogle.setOnClickListener { accesoGoogle.iniciar() }
+
         btnGoToRegister.setOnClickListener {
             startActivity(Intent(this, RegisterActivity::class.java))
         }
+    }
+
+    // ── Helpers ─────────────────────────────────────────────
+
+    /** Desactiva los botones mientras se está iniciando sesión. */
+    private fun cargando(activo: Boolean) {
+        btnLogin.isEnabled = !activo
+        btnGoogle.isEnabled = !activo
     }
 
     private fun mensajeDeError(e: Exception?): String = when (e) {
@@ -77,6 +97,9 @@ class LoginActivity : AppCompatActivity() {
         is FirebaseNetworkException -> "Sin conexión. Revisa tu internet"
         else -> "No se ha podido iniciar sesión"
     }
+
+    private fun toast(mensaje: String, largo: Boolean = false) =
+        Toast.makeText(this, mensaje, if (largo) Toast.LENGTH_LONG else Toast.LENGTH_SHORT).show()
 
     private fun irAMain() {
         startActivity(Intent(this, MainActivity::class.java))

@@ -13,7 +13,20 @@
           "package_name": "com.exemple.llistacompra"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "440849775159-kmimuenrfa7ju7jvcalqnf718fc9eh71.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.exemple.llistacompra",
+            "certificate_hash": "8a6b8b3964142c07a54665b01970b22f68004400"
+          }
+        },
+        {
+          "client_id": "440849775159-9m5i3fj0hjp1drbr1g928ig7msf59vs6.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
           "current_key": "AIzaSyDSjwwL-hH-heWoMvw9gySXDdFSQk9vC0Q"
@@ -21,7 +34,12 @@
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "440849775159-9m5i3fj0hjp1drbr1g928ig7msf59vs6.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
         }
       }
     }

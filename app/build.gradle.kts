@@ -54,8 +54,8 @@ dependencies {
 
     // Firebase
     implementation(platform("com.google.firebase:firebase-bom:34.0.0"))
-    implementation(libs.firebase.auth)
-    implementation("com.google.firebase:firebase-database")   // ← faltaba (Realtime Database)
+    implementation("com.google.firebase:firebase-auth")
+    implementation("com.google.firebase:firebase-database")
 
     // Login con Google
     implementation(libs.androidx.credentials)
