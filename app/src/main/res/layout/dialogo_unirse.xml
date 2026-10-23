@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Diálogo "Unirme a una lista": escribir el código -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:paddingStart="24dp"
+    android:paddingTop="4dp"
+    android:paddingEnd="24dp">
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="12dp"
+        android:text="Escribe el código que te han pasado para ver y editar su lista."
+        android:textColor="@color/text_secondary"
+        android:textSize="14sp" />
+
+    <com.google.android.material.textfield.TextInputLayout
+        android:id="@+id/tilCodigo"
+        style="@style/Widget.LlistaCompra.Campo"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:hint="Código"
+        app:helperText="6 caracteres · no se usan O, 0, I, L ni 1">
+
+        <com.google.android.material.textfield.TextInputEditText
+            android:id="@+id/inputCodigo"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:fontFamily="monospace"
+            android:imeOptions="actionDone"
+            android:inputType="textCapCharacters|textNoSuggestions|textVisiblePassword"
+            android:letterSpacing="0.15"
+            android:maxLines="1"
+            android:textSize="22sp"
+            android:textStyle="bold" />
+    </com.google.android.material.textfield.TextInputLayout>
+
+</LinearLayout>

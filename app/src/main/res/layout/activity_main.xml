@@ -82,14 +82,58 @@
                 app:rippleColor="@color/white_20" />
         </LinearLayout>
 
-        <TextView
-            android:layout_width="wrap_content"
+        <!-- Nombre de la lista (toca para cambiar de lista) + Compartir -->
+        <LinearLayout
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="20dp"
-            android:text="Tu lista de la compra"
-            android:textColor="@color/white"
-            android:textSize="24sp"
-            android:textStyle="bold" />
+            android:layout_marginTop="16dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <LinearLayout
+                android:id="@+id/btnMisListas"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:background="?attr/selectableItemBackground"
+                android:clickable="true"
+                android:focusable="true"
+                android:orientation="vertical"
+                android:paddingTop="4dp"
+                android:paddingBottom="4dp">
+
+                <TextView
+                    android:id="@+id/txtNombreLista"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:ellipsize="end"
+                    android:maxLines="1"
+                    android:text="Cargando…"
+                    android:textColor="@color/white"
+                    android:textSize="24sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/txtInfoLista"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:alpha="0.85"
+                    android:textColor="@color/white"
+                    android:textSize="13sp" />
+            </LinearLayout>
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnCompartir"
+                style="@style/Widget.LlistaCompra.BotonTexto"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Compartir"
+                android:textColor="@color/white"
+                app:icon="@drawable/ic_share"
+                app:iconSize="18dp"
+                app:iconTint="@color/white"
+                app:rippleColor="@color/white_20" />
+        </LinearLayout>
     </LinearLayout>
 
     <!-- ===== TARJETA: AÑADIR PRODUCTO ===== -->

@@ -41,6 +41,7 @@ data class Categoria(
     val id: String = "",
     val nombre: String = "",
     val emoji: String = "",
+    val creador: String = "",   // uid de quien la creó ("" en categorías antiguas)
     val productos: Map<String, Producto> = emptyMap()
 )
 
@@ -56,10 +57,18 @@ class MainActivity : AppCompatActivity() {
     private lateinit var chipsCategoria: ChipGroup
 
     private val auth by lazy { FirebaseAuth.getInstance() }
-    private val dbRef by lazy { FirebaseDatabase.getInstance().getReference("listas") }
     private val uid get() = auth.currentUser?.uid ?: ""
-    private val categoriasRef get() = dbRef.child(uid).child("categorias")
-    private val aprendidoRef get() = dbRef.child(uid).child("aprendido")
+
+    // ── Listas compartidas ──
+    private lateinit var gestor: GestorListas
+    private var listaActualId: String? = null      // lista abierta ahora mismo
+    private var infoLista: InfoLista? = null       // nombre, código, miembros...
+    private lateinit var txtNombreLista: TextView
+    private lateinit var txtInfoLista: TextView
+    private lateinit var btnLimpieza: Button
+
+    private val categoriasRef get() = gestor.refLista(listaActualId!!).child("categorias")
+    private val aprendidoRef get() = gestor.aprendidoRef
 
     private val categorias = mutableMapOf<String, Categoria>()
 
@@ -102,7 +111,7 @@ class MainActivity : AppCompatActivity() {
         configurarBarrasSistema(findViewById(R.id.cabecera))
 
         val btnAfegir      = findViewById<FloatingActionButton>(R.id.btnAfegir)
-        val btnLimpieza    = findViewById<Button>(R.id.btnLimpieza)
+        btnLimpieza        = findViewById(R.id.btnLimpieza)
         val btnVolverLogin = findViewById<Button>(R.id.btnVolverLogin)
         val txtUsuario     = findViewById<TextView>(R.id.txtUsuario)
         val btnNuevaCat    = findViewById<Button>(R.id.btnNuevaCategoria)
@@ -114,14 +123,22 @@ class MainActivity : AppCompatActivity() {
         spinnerCategoria = findViewById(R.id.spinnerCategoria)
         listaProductos   = findViewById(R.id.listaProductos)
 
+        txtNombreLista   = findViewById(R.id.txtNombreLista)
+        txtInfoLista     = findViewById(R.id.txtInfoLista)
+
         configurarSpinner()
 
         // Mientras escribe, sugerimos categoría
         inputProducte.doAfterTextChanged { actualizarSugerencia() }
 
+        // Listas compartidas
+        gestor = GestorListas(uid, auth.currentUser?.email ?: "Usuario")
+        findViewById<View>(R.id.btnMisListas).setOnClickListener { mostrarMisListas() }
+        findViewById<Button>(R.id.btnCompartir).setOnClickListener { mostrarDialogoCompartir() }
+
         mostrarInfoUsuario(txtUsuario)
         cargarAprendido()
-        escucharCategorias()
+        abrirListaActual()
 
         // Enter del teclado
         inputProducte.setOnEditorActionListener { _, actionId, _ ->
@@ -160,6 +177,10 @@ class MainActivity : AppCompatActivity() {
         btnNuevaCat.setOnClickListener { mostrarDialogoCategoria(null) }
 
         btnLimpieza.setOnClickListener {
+            if (!esDueno()) {
+                toast("Solo el dueño de la lista puede borrar productos")
+                return@setOnClickListener
+            }
             val hayCompletados = categorias.values.any { cat -> cat.productos.values.any { it.completado } }
             if (!hayCompletados) {
                 toast("No hay productos completados")
@@ -190,20 +211,65 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
-        listenerCategorias?.let { refEscuchada?.removeEventListener(it) }
+        dejarDeEscuchar()
     }
 
     // ── Firebase ─────────────────────────────────────────
 
-    private fun escucharCategorias() {
-        if (uid.isEmpty()) return
+    /** Abre la última lista usada (o crea "Mi lista" la primera vez). */
+    private fun abrirListaActual() {
+        txtNombreLista.text = "Cargando…"
+        txtInfoLista.text = ""
+        gestor.prepararListaActual(onListo = ::abrirLista, onError = { toast(it) })
+    }
 
-        val ref = categoriasRef
+    /** Cambia a otra lista: deja de escuchar la anterior y escucha la nueva. */
+    private fun abrirLista(listaId: String) {
+        dejarDeEscuchar()
+        listaActualId = listaId
+        infoLista = null
+        categorias.clear()
+        categoriaSeleccionadaId = null
+        reconstruirUI()
+        actualizarSpinner()
+
+        gestor.cambiarListaActual(listaId)
+        escucharLista()
+    }
+
+    private fun dejarDeEscuchar() {
+        listenerCategorias?.let { refEscuchada?.removeEventListener(it) }
+        listenerCategorias = null
+        refEscuchada = null
+    }
+
+    /** Si nos han quitado el acceso (o se ha borrado la lista), pasamos a otra. */
+    private fun perderAcceso() {
+        val id = listaActualId ?: return
+        dejarDeEscuchar()
+        listaActualId = null
+        toast("Ya no tienes acceso a esa lista")
+        gestor.olvidar(id) { abrirListaActual() }
+    }
+
+    /** Un solo listener para toda la lista: nombre, miembros y categorías. */
+    private fun escucharLista() {
+        val id = listaActualId ?: return
+
+        val ref = gestor.refLista(id)
         val listener = object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
+                val info = InfoLista.desde(snapshot)
+                if (info == null) {
+                    perderAcceso()
+                    return
+                }
+                infoLista = info
+                actualizarCabecera(info)
+
                 categorias.clear()
 
-                snapshot.children.forEach { catSnap ->
+                snapshot.child("categorias").children.forEach { catSnap ->
                     val catId  = catSnap.key ?: return@forEach
                     val nombre = catSnap.child("nombre").getValue(String::class.java) ?: return@forEach
 
@@ -218,7 +284,8 @@ class MainActivity : AppCompatActivity() {
                     }
 
                     val emoji = catSnap.child("emoji").getValue(String::class.java).orEmpty()
-                    categorias[catId] = Categoria(catId, nombre, emoji, productos)
+                    val creador = catSnap.child("creador").getValue(String::class.java).orEmpty()
+                    categorias[catId] = Categoria(catId, nombre, emoji, creador, productos)
                 }
 
                 reconstruirUI()
@@ -229,13 +296,209 @@ class MainActivity : AppCompatActivity() {
 
             override fun onCancelled(error: DatabaseError) {
                 Log.e("Firebase", error.message)
-                toast("Error al cargar los datos")
+                if (error.code == DatabaseError.PERMISSION_DENIED) perderAcceso()
+                else toast("Error al cargar los datos")
             }
         }
 
         ref.addValueEventListener(listener)
         refEscuchada = ref
         listenerCategorias = listener
+    }
+
+    // ── Listas compartidas: cabecera y diálogos ──────────
+
+    private fun actualizarCabecera(info: InfoLista) {
+        txtNombreLista.text = "${info.nombre}  ▾"
+        txtInfoLista.text = when {
+            !info.esPropietario(uid) -> "👥 Te han invitado · ${info.miembros.size} personas"
+            info.compartida -> "👥 Compartida · ${info.miembros.size} personas"
+            else -> "Solo tú · pulsa Compartir para invitar"
+        }
+        btnLimpieza.visibility = if (info.esPropietario(uid)) View.VISIBLE else View.GONE
+    }
+
+    /** Selector de listas: cambiar, crear una nueva o unirse con código. */
+    private fun mostrarMisListas() {
+        gestor.misListas { listas ->
+            val textos = listas.map { lista ->
+                val marca = if (lista.id == listaActualId) "✓ " else "    "
+                val compartida = if (lista.compartida) "  👥 ${lista.miembros.size}" else ""
+                "$marca${lista.nombre}$compartida"
+            }.toTypedArray()
+
+            AlertDialog.Builder(this)
+                .setTitle("Mis listas")
+                .setItems(textos) { _, i ->
+                    val elegida = listas[i]
+                    if (elegida.id != listaActualId) abrirLista(elegida.id)
+                }
+                .setPositiveButton("Nueva lista") { _, _ -> mostrarDialogoNuevaLista() }
+                .setNeutralButton("Unirme con código") { _, _ -> mostrarDialogoUnirse() }
+                .setNegativeButton("Cerrar", null)
+                .show()
+        }
+    }
+
+    private fun mostrarDialogoNuevaLista() {
+        mostrarDialogoTexto("Nueva lista", "Nombre de la lista (ej. Cumple de Ana)", "", "Crear") { nombre ->
+            gestor.crearLista(nombre, onListo = { id ->
+                abrirLista(id)
+                toast("Lista «$nombre» creada")
+            }, onError = { toast(it) })
+        }
+    }
+
+    /** Escribir un código para unirse a la lista de otra persona. */
+    private fun mostrarDialogoUnirse() {
+        val vista = layoutInflater.inflate(R.layout.dialogo_unirse, null)
+        val til = vista.findViewById<TextInputLayout>(R.id.tilCodigo)
+        val input = vista.findViewById<TextInputEditText>(R.id.inputCodigo)
+
+        // Siempre en mayúsculas
+        input.filters = arrayOf(android.text.InputFilter.AllCaps(), android.text.InputFilter.LengthFilter(7))
+
+        // Aviso al momento si escribe una letra que no existe en los códigos
+        input.doAfterTextChanged { texto ->
+            val malos = CodigoLista.caracteresNoValidos(CodigoLista.limpiar(texto?.toString().orEmpty()))
+            til.error = if (malos.isEmpty()) null
+            else "Los códigos no llevan ${malos.joinToString(", ")} (no se usan ${CodigoLista.NO_SE_USAN})"
+        }
+
+        val dialogo = AlertDialog.Builder(this)
+            .setTitle("Unirme a una lista")
+            .setView(vista)
+            .setPositiveButton("Unirme", null)
+            .setNegativeButton("Cancelar", null)
+            .create()
+
+        dialogo.setOnShowListener {
+            val btnUnirme = dialogo.getButton(AlertDialog.BUTTON_POSITIVE)
+            btnUnirme.setOnClickListener {
+                val codigo = CodigoLista.limpiar(input.text?.toString().orEmpty())
+                when {
+                    codigo.length != CodigoLista.LONGITUD ->
+                        til.error = "El código tiene ${CodigoLista.LONGITUD} caracteres"
+                    !CodigoLista.esValido(codigo) ->
+                        til.error = "Ese código no es válido (no se usan ${CodigoLista.NO_SE_USAN})"
+                    else -> {
+                        btnUnirme.isEnabled = false
+                        gestor.unirse(codigo,
+                            onListo = { id ->
+                                dialogo.dismiss()
+                                abrirLista(id)
+                                toast("¡Te has unido a la lista!")
+                            },
+                            onError = { mensaje ->
+                                btnUnirme.isEnabled = true
+                                til.error = mensaje
+                            })
+                    }
+                }
+            }
+        }
+        dialogo.show()
+    }
+
+    /** Muestra el código para compartir y las opciones de la lista. */
+    private fun mostrarDialogoCompartir() {
+        val info = infoLista ?: return toast("La lista todavía se está cargando")
+        val soyPropietario = info.esPropietario(uid)
+
+        val vista = layoutInflater.inflate(R.layout.dialogo_compartir, null)
+        val txtExplicacion = vista.findViewById<TextView>(R.id.txtCompartirExplicacion)
+        val txtCodigo = vista.findViewById<TextView>(R.id.txtCodigo)
+        val txtMiembros = vista.findViewById<TextView>(R.id.txtMiembros)
+        val btnCopiar = vista.findViewById<Button>(R.id.btnCopiarCodigo)
+        val btnEnviar = vista.findViewById<Button>(R.id.btnEnviarCodigo)
+        val btnNombre = vista.findViewById<Button>(R.id.btnCambiarNombre)
+        val btnRegenerar = vista.findViewById<Button>(R.id.btnRegenerarCodigo)
+        val btnSalir = vista.findViewById<Button>(R.id.btnSalirLista)
+
+        var codigo = info.codigo
+
+        txtExplicacion.text = "Pasa este código a quien quieras. Podrá ver y editar «${info.nombre}» en tiempo real."
+        txtCodigo.text = CodigoLista.bonito(codigo)
+        txtMiembros.text = info.miembros.entries.joinToString("\n") { (miembroUid, correo) ->
+            val etiquetas = buildList {
+                if (miembroUid == info.propietario) add("creador")
+                if (miembroUid == uid) add("tú")
+            }
+            "• $correo" + if (etiquetas.isNotEmpty()) "  (${etiquetas.joinToString(", ")})" else ""
+        }
+
+        val dialogo = AlertDialog.Builder(this)
+            .setTitle("Compartir lista")
+            .setView(vista)
+            .setPositiveButton("Cerrar", null)
+            .create()
+
+        btnCopiar.setOnClickListener {
+            val portapapeles = getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager
+            portapapeles.setPrimaryClip(android.content.ClipData.newPlainText("Código de lista", codigo))
+            toast("Código copiado")
+        }
+
+        btnEnviar.setOnClickListener {
+            val texto = "¡Únete a mi lista de la compra «${info.nombre}»! 🛒\n" +
+                    "Abre la app, toca el nombre de la lista → «Unirme con código» y escribe:\n\n" +
+                    CodigoLista.bonito(codigo)
+            val intent = Intent(Intent.ACTION_SEND).apply {
+                type = "text/plain"
+                putExtra(Intent.EXTRA_TEXT, texto)
+            }
+            startActivity(Intent.createChooser(intent, "Enviar código"))
+        }
+
+        btnNombre.setOnClickListener {
+            dialogo.dismiss()
+            mostrarDialogoTexto("Cambiar nombre", "Nombre de la lista", info.nombre, "Guardar") { nuevo ->
+                gestor.renombrar(info.id, nuevo)
+            }
+        }
+
+        // Solo el creador puede cambiar el código
+        btnRegenerar.visibility = if (soyPropietario) View.VISIBLE else View.GONE
+        btnRegenerar.setOnClickListener {
+            AlertDialog.Builder(this)
+                .setTitle("¿Generar un código nuevo?")
+                .setMessage("El código actual dejará de funcionar. Quienes ya están en la lista se quedan.")
+                .setPositiveButton("Generar") { _, _ ->
+                    gestor.regenerarCodigo(info, onListo = { nuevo ->
+                        codigo = nuevo
+                        txtCodigo.text = CodigoLista.bonito(nuevo)
+                    }, onError = { toast(it) })
+                }
+                .setNegativeButton("Cancelar", null)
+                .show()
+        }
+
+        // El creador elimina la lista; el resto solo se sale
+        btnSalir.text = if (soyPropietario) "Eliminar lista" else "Salir de la lista"
+        btnSalir.setOnClickListener {
+            val (titulo, mensaje) = if (soyPropietario)
+                "¿Eliminar «${info.nombre}»?" to "Se borrará para todos los miembros. No se puede deshacer."
+            else
+                "¿Salir de «${info.nombre}»?" to "Dejarás de verla. Podrás volver a entrar con el código."
+
+            AlertDialog.Builder(this)
+                .setTitle(titulo)
+                .setMessage(mensaje)
+                .setPositiveButton(if (soyPropietario) "Eliminar" else "Salir") { _, _ ->
+                    dialogo.dismiss()
+                    val alTerminar = {
+                        dejarDeEscuchar()
+                        listaActualId = null
+                        abrirListaActual()
+                    }
+                    if (soyPropietario) gestor.eliminar(info, alTerminar) { toast(it) }
+                    else gestor.salir(info, alTerminar) { toast(it) }
+                }
+                .setNegativeButton("Cancelar", null)
+                .show()
+        }
+
+        dialogo.show()
     }
 
     // ── Autoclasificación ────────────────────────────────
@@ -402,16 +665,17 @@ class MainActivity : AppCompatActivity() {
 
     /** Crea la categoría, la deja seleccionada y devuelve su id. */
     private fun agregarCategoriaEnFirebase(nombre: String, emoji: String): String? {
-        if (uid.isEmpty()) return null
+        if (listaActualId == null) return null
         val catId = categoriasRef.push().key ?: return null
         categoriaSeleccionadaId = catId
-        categoriasRef.child(catId).setValue(mapOf("nombre" to nombre, "emoji" to emoji))
+        // Guardamos quién la crea: solo esa persona (o el dueño de la lista) podrá eliminarla
+        categoriasRef.child(catId).setValue(mapOf("nombre" to nombre, "emoji" to emoji, "creador" to uid))
         return catId
     }
 
     /** Mueve un producto de una categoría a otra en una sola escritura. */
     private fun moverProducto(origenId: String, destinoId: String, producto: Producto) {
-        if (uid.isEmpty() || origenId == destinoId) return
+        if (listaActualId == null || origenId == destinoId) return
         val cambios = mapOf<String, Any?>(
             "$origenId/productos/${producto.id}" to null,
             "$destinoId/productos/${producto.id}" to mapOf(
@@ -424,17 +688,17 @@ class MainActivity : AppCompatActivity() {
 
     /** Cambia nombre y emoji sin tocar los productos de la categoría. */
     private fun editarCategoriaEnFirebase(catId: String, nuevoNombre: String, nuevoEmoji: String) {
-        if (uid.isEmpty()) return
+        if (listaActualId == null) return
         categoriasRef.child(catId).updateChildren(mapOf("nombre" to nuevoNombre, "emoji" to nuevoEmoji))
     }
 
     private fun eliminarCategoriaEnFirebase(catId: String) {
-        if (uid.isEmpty()) return
+        if (listaActualId == null) return
         categoriasRef.child(catId).removeValue()
     }
 
     private fun agregarProductoEnFirebase(catId: String, nombre: String) {
-        if (uid.isEmpty()) return
+        if (listaActualId == null) return
         val productosRef = categoriasRef.child(catId).child("productos")
         val prodId = productosRef.push().key ?: return
 
@@ -447,25 +711,25 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun toggleProductoCompletado(catId: String, prodId: String, completado: Boolean) {
-        if (uid.isEmpty()) return
+        if (listaActualId == null) return
         categoriasRef.child(catId).child("productos").child(prodId)
             .child("completado").setValue(completado)
     }
 
     private fun editarProductoEnFirebase(catId: String, prodId: String, nuevoNombre: String) {
-        if (uid.isEmpty()) return
+        if (listaActualId == null) return
         categoriasRef.child(catId).child("productos").child(prodId)
             .child("nombre").setValue(nuevoNombre)
     }
 
     private fun eliminarProductoEnFirebase(catId: String, prodId: String) {
-        if (uid.isEmpty()) return
+        if (listaActualId == null) return
         categoriasRef.child(catId).child("productos").child(prodId).removeValue()
     }
 
     // Borra todos los completados en UNA sola escritura
     private fun limpiarCompletados() {
-        if (uid.isEmpty()) return
+        if (listaActualId == null) return
 
         val borrados = mutableMapOf<String, Any?>()
         categorias.forEach { (catId, cat) ->
@@ -479,19 +743,52 @@ class MainActivity : AppCompatActivity() {
 
     // ── Diálogos de editar / eliminar ────────────────────
 
+    /**
+     * Puede eliminar una categoría:
+     *  - el dueño de la lista (cualquiera)
+     *  - quien la creó (solo las suyas)
+     * Las reglas de Firebase comprueban lo mismo.
+     */
+    private fun puedeEliminar(categoria: Categoria): Boolean =
+        esDueno() || (categoria.creador == uid && categoria.productos.isEmpty())
+
+    /** ¿Soy el dueño de la lista abierta? (el dueño puede hacerlo todo) */
+    private fun esDueno(): Boolean = infoLista?.esPropietario(uid) == true
+
     private fun mostrarOpcionesCategoria(categoria: Categoria) {
-        AlertDialog.Builder(this)
-            .setTitle(categoria.nombre)
-            .setItems(arrayOf("Editar nombre e icono", "Eliminar")) { _, opcion ->
-                when (opcion) {
-                    0 -> mostrarDialogoCategoria(categoria)
-                    1 -> confirmarEliminarCategoria(categoria)
+        val titulo = "${emojiDe(categoria)} ${categoria.nombre}"
+
+        if (puedeEliminar(categoria)) {
+            AlertDialog.Builder(this)
+                .setTitle(titulo)
+                .setItems(arrayOf("Editar nombre e icono", "Eliminar")) { _, opcion ->
+                    when (opcion) {
+                        0 -> mostrarDialogoCategoria(categoria)
+                        1 -> confirmarEliminarCategoria(categoria)
+                    }
                 }
-            }
-            .show()
+                .show()
+        } else {
+            // Invitado: puede editarla, pero le explicamos por qué no puede eliminarla
+            AlertDialog.Builder(this)
+                .setTitle(titulo)
+                .setMessage(
+                    if (categoria.creador == uid)
+                        "Solo puedes eliminar tus categorías cuando están vacías. Pide al dueño de la lista que borre los productos."
+                    else
+                        "Solo el dueño de la lista o quien creó esta categoría puede eliminarla."
+                )
+                .setPositiveButton("Editar nombre e icono") { _, _ -> mostrarDialogoCategoria(categoria) }
+                .setNegativeButton("Cerrar", null)
+                .show()
+        }
     }
 
     private fun confirmarEliminarCategoria(categoria: Categoria) {
+        if (!puedeEliminar(categoria)) {
+            toast("No tienes permiso para eliminar esta categoría")
+            return
+        }
         val total = categoria.productos.size
         val mensaje = if (total == 0) "¿Eliminar la categoría \"${categoria.nombre}\"?"
         else "Se eliminará \"${categoria.nombre}\" y sus $total producto(s). ¿Continuar?"
@@ -505,6 +802,16 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun mostrarOpcionesProducto(catId: String, producto: Producto) {
+        // Los invitados solo pueden añadir y tachar productos
+        if (!esDueno()) {
+            AlertDialog.Builder(this)
+                .setTitle(producto.nombre)
+                .setMessage("Solo el dueño de la lista puede editar, mover o eliminar productos.\n\nTú puedes añadir productos y tacharlos.")
+                .setPositiveButton("Entendido", null)
+                .show()
+            return
+        }
+
         AlertDialog.Builder(this)
             .setTitle(producto.nombre)
             .setItems(arrayOf("Editar", "Cambiar de categoría", "Eliminar")) { _, opcion ->
@@ -536,7 +843,7 @@ class MainActivity : AppCompatActivity() {
                 val destino = otras[i]
                 moverProducto(catActualId, destino.id, producto)
                 aprender(producto.nombre, destino.nombre)
-                toast("Movido a ${destino.nombre}. Lo recordaré para la próxima vez")
+                toast("Movido a ${destino.nombre}.")
             }
             .setNegativeButton("Cancelar", null)
             .show()

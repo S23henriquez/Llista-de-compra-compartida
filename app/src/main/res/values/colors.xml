@@ -14,6 +14,9 @@
     <color name="text_primary">#FF1B1F1D</color>
     <color name="text_secondary">#FF6B7570</color>
 
+    <!-- Acciones destructivas (eliminar, salir) -->
+    <color name="peligro">#FFC62828</color>
+
     <color name="white">#FFFFFFFF</color>
     <color name="black">#FF000000</color>
     <color name="white_20">#33FFFFFF</color>
