@@ -50,14 +50,6 @@
                 android:textSize="26sp"
                 android:textStyle="bold" />
 
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="4dp"
-                android:alpha="0.85"
-                android:text="Organiza tus compras en un momento"
-                android:textColor="@color/white"
-                android:textSize="14sp" />
         </LinearLayout>
 
         <!-- ===== TARJETA DEL FORMULARIO ===== -->
@@ -79,15 +71,6 @@
                 android:textColor="@color/text_primary"
                 android:textSize="20sp"
                 android:textStyle="bold" />
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="4dp"
-                android:layout_marginBottom="20dp"
-                android:text="Introduce tus datos para continuar"
-                android:textColor="@color/text_secondary"
-                android:textSize="14sp" />
 
             <com.google.android.material.textfield.TextInputLayout
                 style="@style/Widget.LlistaCompra.Campo"

@@ -13,13 +13,6 @@
         android:paddingTop="4dp"
         android:paddingEnd="24dp">
 
-        <TextView
-            android:id="@+id/txtCompartirExplicacion"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:textColor="@color/text_secondary"
-            android:textSize="14sp" />
-
         <!-- El código, grande y fácil de leer -->
         <TextView
             android:id="@+id/txtCodigo"
@@ -38,16 +31,7 @@
             android:textSize="34sp"
             android:textStyle="bold" />
 
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="6dp"
-            android:gravity="center"
-            android:text="Sin O, 0, I, L ni 1 para que no haya confusiones"
-            android:textColor="@color/text_secondary"
-            android:textSize="12sp" />
-
-        <!-- Copiar / Enviar -->
+        <!-- Copiar código -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -83,6 +67,14 @@
                 app:iconSize="18dp"
                 app:iconTint="@color/white" />
         </LinearLayout>
+
+        <TextView
+            android:id="@+id/txtMensajeCompartir"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:textColor="@color/text_secondary"
+            android:textSize="13sp" />
 
         <!-- Miembros -->
         <TextView

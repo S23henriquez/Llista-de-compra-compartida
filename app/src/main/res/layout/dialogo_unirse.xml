@@ -9,21 +9,12 @@
     android:paddingTop="4dp"
     android:paddingEnd="24dp">
 
-    <TextView
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginBottom="12dp"
-        android:text="Escribe el código que te han pasado para ver y editar su lista."
-        android:textColor="@color/text_secondary"
-        android:textSize="14sp" />
-
     <com.google.android.material.textfield.TextInputLayout
         android:id="@+id/tilCodigo"
         style="@style/Widget.LlistaCompra.Campo"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:hint="Código"
-        app:helperText="6 caracteres · no se usan O, 0, I, L ni 1">
+        android:hint="Código">
 
         <com.google.android.material.textfield.TextInputEditText
             android:id="@+id/inputCodigo"

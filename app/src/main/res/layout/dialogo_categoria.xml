@@ -43,43 +43,16 @@
         </com.google.android.material.textfield.TextInputLayout>
     </LinearLayout>
 
-    <TextView
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="16dp"
-        android:layout_marginBottom="8dp"
-        android:text="Elige un icono"
-        android:textColor="@color/text_secondary"
-        android:textSize="12sp"
-        android:textStyle="bold" />
-
     <!-- Cuadrícula de emojis -->
     <GridView
         android:id="@+id/gridEmojis"
         android:layout_width="match_parent"
         android:layout_height="208dp"
+        android:layout_marginTop="16dp"
         android:horizontalSpacing="4dp"
         android:listSelector="@android:color/transparent"
         android:numColumns="6"
         android:stretchMode="columnWidth"
         android:verticalSpacing="4dp" />
-
-    <!-- Cualquier otro emoji con el teclado -->
-    <com.google.android.material.textfield.TextInputLayout
-        android:id="@+id/tilOtroEmoji"
-        style="@style/Widget.LlistaCompra.Campo"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="12dp"
-        android:hint="¿Otro? Escríbelo con el teclado"
-        app:helperText="Usa el botón de emojis 😊 de tu teclado">
-
-        <com.google.android.material.textfield.TextInputEditText
-            android:id="@+id/inputOtroEmoji"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:inputType="text"
-            android:maxLines="1" />
-    </com.google.android.material.textfield.TextInputLayout>
 
 </LinearLayout>
