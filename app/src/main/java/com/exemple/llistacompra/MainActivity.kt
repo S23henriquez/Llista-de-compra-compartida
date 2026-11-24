@@ -95,6 +95,16 @@ class MainActivity : AppCompatActivity() {
     private var refEscuchada: DatabaseReference? = null
     private var listenerCategorias: ValueEventListener? = null
 
+    // Categorías plegadas: se guarda solo en este móvil (cada uno pliega las suyas)
+    private val prefsUi by lazy { getSharedPreferences("ui", MODE_PRIVATE) }
+    private val categoriasPlegadas: MutableSet<String> by lazy {
+        prefsUi.getStringSet("categorias_plegadas", emptySet())!!.toMutableSet()
+    }
+
+    private fun guardarPlegadas() {
+        prefsUi.edit().putStringSet("categorias_plegadas", categoriasPlegadas.toSet()).apply()
+    }
+
     private val Int.dp get() = (this * resources.displayMetrics.density).toInt()
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -891,6 +901,33 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+        // Cuerpo con los productos: es lo que se pliega/despliega
+        val cuerpo = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        var plegada = categoria.id in categoriasPlegadas
+
+        // Flecha desplegable a la izquierda
+        val flecha = TextView(this).apply {
+            textSize = 16f
+            setTextColor(color(R.color.text_secondary))
+            setPadding(0, 0, 8.dp, 0)
+        }
+
+        fun aplicarPlegado() {
+            flecha.text = if (plegada) "▸" else "▾"
+            flecha.contentDescription = if (plegada) "Desplegar ${categoria.nombre}" else "Plegar ${categoria.nombre}"
+            cuerpo.visibility = if (plegada) View.GONE else View.VISIBLE
+        }
+        aplicarPlegado()
+
+        // Tocar la cabecera (o la flecha) pliega/despliega la categoría
+        cabecera.setOnClickListener {
+            plegada = !plegada
+            if (plegada) categoriasPlegadas.add(categoria.id) else categoriasPlegadas.remove(categoria.id)
+            guardarPlegadas()
+            aplicarPlegado()
+        }
+        cabecera.addView(flecha)
+
         // Emoji: al tocarlo se abre el editor de la categoría
         cabecera.addView(TextView(this).apply {
             text = emojiDe(categoria)
@@ -931,9 +968,10 @@ class MainActivity : AppCompatActivity() {
         })
 
         contenedor.addView(cabecera)
+        contenedor.addView(cuerpo)
 
         if (categoria.productos.isEmpty()) {
-            contenedor.addView(TextView(this).apply {
+            cuerpo.addView(TextView(this).apply {
                 text = "Sin productos todavía"
                 setTextColor(color(R.color.text_secondary))
                 setTypeface(typeface, Typeface.ITALIC)
@@ -943,7 +981,7 @@ class MainActivity : AppCompatActivity() {
             // Pendientes primero, completados al final; alfabético dentro de cada grupo
             categoria.productos.values
                 .sortedWith(compareBy<Producto>({ it.completado }, { it.nombre.lowercase() }))
-                .forEach { contenedor.addView(crearVistaProducto(categoria.id, it)) }
+                .forEach { cuerpo.addView(crearVistaProducto(categoria.id, it)) }
         }
 
         return contenedor
