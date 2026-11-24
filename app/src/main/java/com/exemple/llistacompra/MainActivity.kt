@@ -64,7 +64,6 @@ class MainActivity : AppCompatActivity() {
     private var listaActualId: String? = null      // lista abierta ahora mismo
     private var infoLista: InfoLista? = null       // nombre, código, miembros...
     private lateinit var txtNombreLista: TextView
-    private lateinit var txtInfoLista: TextView
     private lateinit var btnLimpieza: Button
 
     private val categoriasRef get() = gestor.refLista(listaActualId!!).child("categorias")
@@ -96,6 +95,16 @@ class MainActivity : AppCompatActivity() {
     private var refEscuchada: DatabaseReference? = null
     private var listenerCategorias: ValueEventListener? = null
 
+    // Categorías plegadas: se guarda solo en este móvil (cada uno pliega las suyas)
+    private val prefsUi by lazy { getSharedPreferences("ui", MODE_PRIVATE) }
+    private val categoriasPlegadas: MutableSet<String> by lazy {
+        prefsUi.getStringSet("categorias_plegadas", emptySet())!!.toMutableSet()
+    }
+
+    private fun guardarPlegadas() {
+        prefsUi.edit().putStringSet("categorias_plegadas", categoriasPlegadas.toSet()).apply()
+    }
+
     private val Int.dp get() = (this * resources.displayMetrics.density).toInt()
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -124,7 +133,6 @@ class MainActivity : AppCompatActivity() {
         listaProductos   = findViewById(R.id.listaProductos)
 
         txtNombreLista   = findViewById(R.id.txtNombreLista)
-        txtInfoLista     = findViewById(R.id.txtInfoLista)
 
         configurarSpinner()
 
@@ -153,7 +161,7 @@ class MainActivity : AppCompatActivity() {
             val nombre = inputProducte.text?.toString()?.trim().orEmpty()
 
             if (nombre.isBlank()) {
-                tilProducte.error = "Introduce un producto"
+                tilProducte.error = "Rellena el producto"
                 return@setOnClickListener
             }
 
@@ -219,7 +227,6 @@ class MainActivity : AppCompatActivity() {
     /** Abre la última lista usada (o crea "Mi lista" la primera vez). */
     private fun abrirListaActual() {
         txtNombreLista.text = "Cargando…"
-        txtInfoLista.text = ""
         gestor.prepararListaActual(onListo = ::abrirLista, onError = { toast(it) })
     }
 
@@ -310,11 +317,6 @@ class MainActivity : AppCompatActivity() {
 
     private fun actualizarCabecera(info: InfoLista) {
         txtNombreLista.text = "${info.nombre}  ▾"
-        txtInfoLista.text = when {
-            !info.esPropietario(uid) -> "👥 Te han invitado · ${info.miembros.size} personas"
-            info.compartida -> "👥 Compartida · ${info.miembros.size} personas"
-            else -> "Solo tú · pulsa Compartir para invitar"
-        }
         btnLimpieza.visibility = if (info.esPropietario(uid)) View.VISIBLE else View.GONE
     }
 
@@ -406,8 +408,8 @@ class MainActivity : AppCompatActivity() {
         val soyPropietario = info.esPropietario(uid)
 
         val vista = layoutInflater.inflate(R.layout.dialogo_compartir, null)
-        val txtExplicacion = vista.findViewById<TextView>(R.id.txtCompartirExplicacion)
         val txtCodigo = vista.findViewById<TextView>(R.id.txtCodigo)
+        val txtMensaje = vista.findViewById<TextView>(R.id.txtMensajeCompartir)
         val txtMiembros = vista.findViewById<TextView>(R.id.txtMiembros)
         val btnCopiar = vista.findViewById<Button>(R.id.btnCopiarCodigo)
         val btnEnviar = vista.findViewById<Button>(R.id.btnEnviarCodigo)
@@ -417,8 +419,13 @@ class MainActivity : AppCompatActivity() {
 
         var codigo = info.codigo
 
-        txtExplicacion.text = "Pasa este código a quien quieras. Podrá ver y editar «${info.nombre}» en tiempo real."
+        // Mensaje de invitación (se usa para mostrarlo y para enviarlo)
+        fun mensajeInvitacion() = "¡Únete a mi lista de la compra «${info.nombre}»! 🛒\n" +
+            "Abre la app, toca el nombre de la lista → «Unirme con código» y escribe:\n\n" +
+            CodigoLista.bonito(codigo)
+
         txtCodigo.text = CodigoLista.bonito(codigo)
+        txtMensaje.text = mensajeInvitacion()
         txtMiembros.text = info.miembros.entries.joinToString("\n") { (miembroUid, correo) ->
             val etiquetas = buildList {
                 if (miembroUid == info.propietario) add("creador")
@@ -439,13 +446,11 @@ class MainActivity : AppCompatActivity() {
             toast("Código copiado")
         }
 
+        // Abre el menú de compartir de Android (WhatsApp, Telegram, correo...)
         btnEnviar.setOnClickListener {
-            val texto = "¡Únete a mi lista de la compra «${info.nombre}»! 🛒\n" +
-                    "Abre la app, toca el nombre de la lista → «Unirme con código» y escribe:\n\n" +
-                    CodigoLista.bonito(codigo)
             val intent = Intent(Intent.ACTION_SEND).apply {
                 type = "text/plain"
-                putExtra(Intent.EXTRA_TEXT, texto)
+                putExtra(Intent.EXTRA_TEXT, mensajeInvitacion())
             }
             startActivity(Intent.createChooser(intent, "Enviar código"))
         }
@@ -467,6 +472,7 @@ class MainActivity : AppCompatActivity() {
                     gestor.regenerarCodigo(info, onListo = { nuevo ->
                         codigo = nuevo
                         txtCodigo.text = CodigoLista.bonito(nuevo)
+                        txtMensaje.text = mensajeInvitacion()
                     }, onError = { toast(it) })
                 }
                 .setNegativeButton("Cancelar", null)
@@ -523,7 +529,6 @@ class MainActivity : AppCompatActivity() {
                 }
                 spinnerTocado = false
 
-                actualizarAyuda()
             }
             override fun onNothingSelected(parent: AdapterView<*>?) {}
         }
@@ -540,7 +545,6 @@ class MainActivity : AppCompatActivity() {
             sugerencia = null
             eleccionManual = false
             pintarChips()
-            actualizarAyuda()
             return
         }
 
@@ -555,7 +559,6 @@ class MainActivity : AppCompatActivity() {
         if (!eleccionManual) idSugerido()?.let { seleccionarEnSpinner(it) }
 
         pintarChips()
-        actualizarAyuda()
     }
 
     /** Muestra un chip por categoría posible cuando hay más de una. */
@@ -581,25 +584,6 @@ class MainActivity : AppCompatActivity() {
         sugerencia = nombre
         eleccionManual = false
         idSugerido()?.let { seleccionarEnSpinner(it) }
-        actualizarAyuda()
-    }
-
-    /** Texto de ayuda bajo el campo: dónde se va a guardar el producto. */
-    private fun actualizarAyuda() {
-        val nombre = inputProducte.text?.toString()?.trim().orEmpty()
-        if (nombre.isEmpty()) {
-            tilProducte.helperText = null
-            return
-        }
-
-        val destino = categoriaDestino()
-        val etiqueta = when {
-            destino.id == null -> " (nueva categoría)"
-            chipElegido != null -> ""
-            !eleccionManual && sugerencia != null -> " · sugerida"
-            else -> ""
-        }
-        tilProducte.helperText = "Se añadirá a: ${destino.nombre}$etiqueta"
     }
 
     private fun categoriaDestino(): Destino {
@@ -907,10 +891,6 @@ class MainActivity : AppCompatActivity() {
             ).apply { topMargin = 12.dp }
         }
 
-        // Cabecera: nombre a la izquierda, contador "pendientes/total" a la derecha
-        val total = categoria.productos.size
-        val pendientes = categoria.productos.values.count { !it.completado }
-
         val cabecera = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -920,6 +900,33 @@ class MainActivity : AppCompatActivity() {
                 true
             }
         }
+
+        // Cuerpo con los productos: es lo que se pliega/despliega
+        val cuerpo = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        var plegada = categoria.id in categoriasPlegadas
+
+        // Flecha desplegable a la izquierda
+        val flecha = TextView(this).apply {
+            textSize = 16f
+            setTextColor(color(R.color.text_secondary))
+            setPadding(0, 0, 8.dp, 0)
+        }
+
+        fun aplicarPlegado() {
+            flecha.text = if (plegada) "▸" else "▾"
+            flecha.contentDescription = if (plegada) "Desplegar ${categoria.nombre}" else "Plegar ${categoria.nombre}"
+            cuerpo.visibility = if (plegada) View.GONE else View.VISIBLE
+        }
+        aplicarPlegado()
+
+        // Tocar la cabecera (o la flecha) pliega/despliega la categoría
+        cabecera.setOnClickListener {
+            plegada = !plegada
+            if (plegada) categoriasPlegadas.add(categoria.id) else categoriasPlegadas.remove(categoria.id)
+            guardarPlegadas()
+            aplicarPlegado()
+        }
+        cabecera.addView(flecha)
 
         // Emoji: al tocarlo se abre el editor de la categoría
         cabecera.addView(TextView(this).apply {
@@ -939,7 +946,10 @@ class MainActivity : AppCompatActivity() {
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
         })
 
+        // Contador "pendientes/total" al lado del menú ⋮
+        val total = categoria.productos.size
         if (total > 0) {
+            val pendientes = categoria.productos.values.count { !it.completado }
             cabecera.addView(TextView(this).apply {
                 text = "$pendientes/$total"
                 textSize = 12f
@@ -947,10 +957,21 @@ class MainActivity : AppCompatActivity() {
             })
         }
 
+        cabecera.addView(TextView(this).apply {
+            text = "⋮"
+            textSize = 26f
+            gravity = Gravity.CENTER
+            setTextColor(color(R.color.text_secondary))
+            setPadding(12.dp, 0, 0, 0)
+            contentDescription = "Opciones de ${categoria.nombre}"
+            setOnClickListener { mostrarOpcionesCategoria(categoria) }
+        })
+
         contenedor.addView(cabecera)
+        contenedor.addView(cuerpo)
 
         if (categoria.productos.isEmpty()) {
-            contenedor.addView(TextView(this).apply {
+            cuerpo.addView(TextView(this).apply {
                 text = "Sin productos todavía"
                 setTextColor(color(R.color.text_secondary))
                 setTypeface(typeface, Typeface.ITALIC)
@@ -960,7 +981,7 @@ class MainActivity : AppCompatActivity() {
             // Pendientes primero, completados al final; alfabético dentro de cada grupo
             categoria.productos.values
                 .sortedWith(compareBy<Producto>({ it.completado }, { it.nombre.lowercase() }))
-                .forEach { contenedor.addView(crearVistaProducto(categoria.id, it)) }
+                .forEach { cuerpo.addView(crearVistaProducto(categoria.id, it)) }
         }
 
         return contenedor
@@ -1003,6 +1024,15 @@ class MainActivity : AppCompatActivity() {
 
         fila.addView(checkBox)
         fila.addView(tv)
+        fila.addView(TextView(this).apply {
+            text = "⋮"
+            textSize = 26f
+            gravity = Gravity.CENTER
+            setTextColor(color(R.color.text_secondary))
+            setPadding(12.dp, 0, 0, 0)
+            contentDescription = "Opciones de ${producto.nombre}"
+            setOnClickListener { mostrarOpcionesProducto(catId, producto) }
+        })
 
         return fila
     }
@@ -1051,8 +1081,6 @@ class MainActivity : AppCompatActivity() {
         val tilNombre = vista.findViewById<TextInputLayout>(R.id.tilNombreCategoria)
         val inputNombre = vista.findViewById<TextInputEditText>(R.id.inputNombreCategoria)
         val grid = vista.findViewById<GridView>(R.id.gridEmojis)
-        val tilOtro = vista.findViewById<TextInputLayout>(R.id.tilOtroEmoji)
-        val inputOtro = vista.findViewById<TextInputEditText>(R.id.inputOtroEmoji)
 
         var emojiElegido = existente?.let { emojiDe(it) } ?: Clasificador.EMOJI_POR_DEFECTO
         var emojiTocado = existente != null   // al editar no cambiamos el emoji solo
@@ -1078,24 +1106,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         grid.setOnItemClickListener { _, _, posicion, _ ->
-            inputOtro.text?.clear()
             elegir(adapter.getItem(posicion), aMano = true)
-        }
-
-        // Cualquier emoji escrito con el teclado
-        inputOtro.doAfterTextChanged { texto ->
-            val escrito = texto?.toString().orEmpty()
-            if (escrito.isBlank()) {
-                tilOtro.error = null
-                return@doAfterTextChanged
-            }
-            val emoji = primerEmoji(escrito)
-            if (emoji == null) {
-                tilOtro.error = "Eso no es un emoji"
-            } else {
-                tilOtro.error = null
-                elegir(emoji, aMano = true)
-            }
         }
 
         val dialogo = AlertDialog.Builder(this)
@@ -1122,23 +1133,6 @@ class MainActivity : AppCompatActivity() {
         }
 
         dialogo.show()
-    }
-
-    /**
-     * Devuelve el primer emoji del texto, o null si lo primero es una letra/número.
-     * Usa el BreakIterator de ICU para no partir emojis compuestos (👨‍👩‍👧, 🇪🇸...).
-     */
-    private fun primerEmoji(texto: String): String? {
-        val limpio = texto.trim()
-        if (limpio.isEmpty()) return null
-
-        val iterador = android.icu.text.BreakIterator.getCharacterInstance()
-        iterador.setText(limpio)
-        val fin = iterador.next()
-        val primero = if (fin > 0) limpio.substring(0, fin) else limpio
-
-        val codigo = primero.codePointAt(0)
-        return if (Character.isLetterOrDigit(codigo) || Character.isWhitespace(codigo)) null else primero
     }
 
     /** Adaptador de la cuadrícula: marca con un recuadro el emoji seleccionado. */
